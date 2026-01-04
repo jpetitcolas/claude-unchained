@@ -10,9 +10,6 @@ if [ ! -d "$(pwd)" ]; then
     exit 1
 fi
 
-# Create named volume for session state if it doesn't exist
-docker volume create claude-sessions > /dev/null 2>&1 || true
-
 # Detect if running in interactive terminal
 if [ -t 0 ] && [ -t 1 ]; then
     INTERACTIVE_FLAGS="-it"
@@ -21,14 +18,23 @@ else
 fi
 
 # Run Claude Code in isolated container
-# Mount credentials as read-only, but allow write access to other claude directories
+# Mount host .claude for auth and config (sessions filtered by workspace path)
 # --cap-add=NET_ADMIN is required for iptables firewall configuration
 # CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1 allows autonomous operation within the isolated container
+# CLAUDE_CONFIG_DIR tells Claude Code where to find config files
+# --hostname=claude-isolated provides consistent identity across container runs
+# Mount workspace at same path as host so Claude can track sessions per project
+# Pass through TERM and COLORTERM for proper color support
+WORKSPACE_PATH="$(pwd)"
 docker run --rm $INTERACTIVE_FLAGS \
     --cap-add=NET_ADMIN \
+    --hostname=claude-isolated \
     -e CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1 \
-    -v "$(pwd):/workspace" \
-    -v "$HOME/.claude/.credentials.json:/home/claude/.claude/.credentials.json:ro" \
-    -v claude-sessions:/home/claude/.claude/projects \
-    -v claude-config:/home/claude/.claude \
+    -e CLAUDE_CONFIG_DIR=/home/claude/.claude \
+    -e DEVCONTAINER=true \
+    -e TERM="${TERM:-xterm-256color}" \
+    -e COLORTERM="${COLORTERM:-truecolor}" \
+    -w "$WORKSPACE_PATH" \
+    -v "$WORKSPACE_PATH:$WORKSPACE_PATH" \
+    -v "$HOME/.claude:/home/claude/.claude" \
     claude-isolated "$@"

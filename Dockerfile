@@ -5,7 +5,7 @@ FROM ubuntu:24.04
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install essential packages including iptables for firewall
+# Install essential packages including iptables for firewall and gosu for user switching
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     iptables \
     iproute2 \
     dnsutils \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 (required for Claude Code)
@@ -50,14 +51,17 @@ RUN if id 1000 > /dev/null 2>&1; then \
 # Don't switch to claude user yet - entrypoint needs root for iptables
 # The entrypoint will switch to claude after setting up firewall
 
-# The installer puts claude in /root/.local/bin, make it accessible to claude user
-ENV PATH="/root/.local/bin:${PATH}"
+# Add both root and claude user bin paths
+ENV PATH="/home/claude/.local/bin:/root/.local/bin:${PATH}"
 
-# Set up Claude Code config directory
-RUN mkdir -p /home/claude/.claude
+# Set up Claude Code config directory and .local/bin for claude user
+RUN mkdir -p /home/claude/.claude /home/claude/.local/bin /home/claude/.local/share && \
+    ln -s /usr/local/bin/claude /home/claude/.local/bin/claude && \
+    ln -s /usr/local/share/claude /home/claude/.local/share/claude && \
+    chown -R claude:claude /home/claude
 
 WORKDIR /workspace
 
 # Set entrypoint to configure firewall before running Claude
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh", "/usr/local/bin/claude"]
-CMD ["--help"]
+CMD []

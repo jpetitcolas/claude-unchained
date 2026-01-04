@@ -84,7 +84,12 @@ echo "Whitelisted domains:"
 printf '  - %s\n' "${WHITELISTED_DOMAINS[@]}"
 echo ""
 
+# Ensure claude user owns their home directory and .claude config
+chown -R claude:claude /home/claude/.claude 2>/dev/null || true
+
 # Switch to claude user and execute the command passed to the container (Claude Code)
 # We need to run as root for iptables setup, then drop to claude user
-cd /workspace
-exec su claude -c "$*"
+# Using gosu instead of su for better signal handling and proper stdin/stdout/stderr
+# Set HOME explicitly since gosu doesn't update environment variables
+# Working directory is set by docker -w flag
+exec gosu claude env HOME=/home/claude "$@"

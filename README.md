@@ -8,10 +8,11 @@ A containerized Claude Code setup that:
 
 - **Limits filesystem access** to the current project directory only
 - **Restricts network access** to approved domains via iptables firewall
-- **Isolates credentials and configuration** from the host system
+- **Shares authentication and settings** from host `~/.claude` directory
 - **Runs with full permissions** within the isolated environment (autonomous operation)
+- **Maintains separate sessions per project** (works like local `claude`)
 
-Perfect for letting AI assistants work freely within a controlled, throwaway sandbox.
+Perfect for letting AI assistants work freely within a controlled, network-restricted sandbox.
 
 ## Quick Start
 
@@ -40,7 +41,7 @@ You need Claude Code credentials on your host system:
 claude login
 ```
 
-The containerized version will reuse these credentials (read-only).
+The containerized version shares your `~/.claude` directory (auth, theme, config, and sessions).
 
 ## What's Allowed
 
@@ -58,46 +59,60 @@ To modify: Edit `WHITELISTED_DOMAINS` in `entrypoint.sh` and rebuild.
 
 ### Filesystem Access
 
-- ✅ Current workspace (read/write)
-- ✅ Credentials from `~/.claude/.credentials.json` (read-only)
-- ✅ Isolated config in Docker volumes
-- ❌ Host system files
+- ✅ Current workspace (read/write, mounted at actual host path)
+- ✅ Host `~/.claude` directory (read/write, for auth, config, and sessions)
+- ❌ All other host system files
 - ❌ Other project directories
+
+**Session Isolation:** Sessions are automatically filtered by workspace path (just like local `claude`), so each project maintains its own session history.
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────┐
-│  Docker Container (Ubuntu 24.04 LTS)     │
-│  ┌────────────────────────────────────┐  │
-│  │ iptables Firewall (runs as root)  │  │
-│  │ ├─ Allow: whitelisted domains     │  │
-│  │ └─ Block: everything else         │  │
-│  ├────────────────────────────────────┤  │
-│  │ Claude Code 2.0.76 (user: claude) │  │
-│  │ └─ Access: /workspace only        │  │
-│  └────────────────────────────────────┘  │
-└──────────────────────────────────────────┘
-           │                    │
-      (mounted)            (mounted)
-           │                    │
-     Current Dir         ~/.claude/.credentials.json
-     (read-write)             (read-only)
+┌───────────────────────────────────────────────────┐
+│  Docker Container (Ubuntu 24.04 LTS)              │
+│  ┌─────────────────────────────────────────────┐  │
+│  │ iptables Firewall (runs as root)            │  │
+│  │ ├─ Allow: whitelisted domains               │  │
+│  │ └─ Block: everything else                   │  │
+│  ├─────────────────────────────────────────────┤  │
+│  │ Claude Code 2.0.76 (user: claude)           │  │
+│  │ ├─ Working dir: /path/to/project            │  │
+│  │ └─ Config: /home/claude/.claude             │  │
+│  └─────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────┘
+              │                       │
+         (mounted)               (mounted)
+              │                       │
+      /path/to/project          ~/.claude
+       (read-write)            (read-write)
+     [current workspace]    [auth, config, sessions]
 ```
+
+**Key Design Choices:**
+- Workspace mounted at same path as host for session continuity
+- Sessions filtered by workspace path (automatic per-project isolation)
+- Network restricted to essential domains only
 
 ## Requirements
 
 - Docker with CAP_NET_ADMIN capability support
-- Existing Claude Code credentials on host (`~/.claude/.credentials.json`)
+- Existing Claude Code authentication on host (`~/.claude/`)
 
 ## Troubleshooting
 
-**"Credentials not found":**
+**"Credentials not found" or setup wizard appears:**
 ```bash
+# Login with regular claude on host first
 claude login
 ```
 
 **Uninstall:**
 ```bash
-make uninstall  # Prompts to remove Docker volumes
+make uninstall
+```
+
+**Rebuild after changes:**
+```bash
+make install  # Rebuilds image and reinstalls script
 ```
