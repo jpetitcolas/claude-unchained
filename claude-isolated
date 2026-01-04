@@ -1,0 +1,34 @@
+#!/bin/bash
+# Claude Code Isolated - Wrapper script for containerized Claude Code
+# Usage: ./claude-isolated [claude arguments...]
+
+set -e
+
+# Ensure we have a workspace to mount
+if [ ! -d "$(pwd)" ]; then
+    echo "Error: Current directory does not exist"
+    exit 1
+fi
+
+# Create named volume for session state if it doesn't exist
+docker volume create claude-sessions > /dev/null 2>&1 || true
+
+# Detect if running in interactive terminal
+if [ -t 0 ] && [ -t 1 ]; then
+    INTERACTIVE_FLAGS="-it"
+else
+    INTERACTIVE_FLAGS=""
+fi
+
+# Run Claude Code in isolated container
+# Mount credentials as read-only, but allow write access to other claude directories
+# --cap-add=NET_ADMIN is required for iptables firewall configuration
+# CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1 allows autonomous operation within the isolated container
+docker run --rm $INTERACTIVE_FLAGS \
+    --cap-add=NET_ADMIN \
+    -e CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1 \
+    -v "$(pwd):/workspace" \
+    -v "$HOME/.claude/.credentials.json:/home/claude/.claude/.credentials.json:ro" \
+    -v claude-sessions:/home/claude/.claude/projects \
+    -v claude-config:/home/claude/.claude \
+    claude-isolated "$@"
