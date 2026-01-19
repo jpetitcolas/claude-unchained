@@ -27,11 +27,11 @@ fi
 # Use --permission-mode bypassPermissions for YOLO mode (no prompts)
 WORKSPACE_PATH="$(pwd)"
 
-# Parse CLAUDE_EXTRA_MOUNTS environment variable
+# Parse CLAUDE_UNCHAINED_EXTRA_MOUNTS environment variable
 # Format: space-separated mount specs (e.g., "/host/path:/container/path:ro /another:/path")
 EXTRA_MOUNT_FLAGS=""
-if [ -n "$CLAUDE_EXTRA_MOUNTS" ]; then
-    for mount in $CLAUDE_EXTRA_MOUNTS; do
+if [ -n "$CLAUDE_UNCHAINED_EXTRA_MOUNTS" ]; then
+    for mount in $CLAUDE_UNCHAINED_EXTRA_MOUNTS; do
         EXTRA_MOUNT_FLAGS="$EXTRA_MOUNT_FLAGS -v $mount"
     done
 fi
@@ -40,6 +40,7 @@ docker run --rm $INTERACTIVE_FLAGS \
     --privileged \
     --hostname=claude-isolated \
     -e CLAUDE_CONFIG_DIR=/home/claude/.claude \
+    -e CLAUDE_UNCHAINED_WHITELIST_DOMAINS="${CLAUDE_UNCHAINED_WHITELIST_DOMAINS:-}" \
     -e TERM="${TERM:-xterm-256color}" \
     -e COLORTERM="${COLORTERM:-truecolor}" \
     -w "$WORKSPACE_PATH" \

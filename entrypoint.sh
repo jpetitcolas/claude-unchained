@@ -4,7 +4,7 @@
 
 set -e
 
-# Hardcoded whitelist of allowed domains
+# Hardcoded whitelist of allowed domains (minimal set)
 WHITELISTED_DOMAINS=(
     # Claude Code
     "code.claude.com"
@@ -15,14 +15,6 @@ WHITELISTED_DOMAINS=(
     "github.com"
     "raw.githubusercontent.com"
     "api.github.com"
-    # NPM
-    "npmjs.com"
-    "registry.npmjs.org"
-    # PyPI
-    "pypi.org"
-    "files.pythonhosted.org"
-    # Prisma
-    "binaries.prisma.sh"
     # Docker Hub - Official allowlist from https://docs.docker.com/desktop/setup/allow-list/
     "auth.docker.io"
     "login.docker.com"
@@ -33,8 +25,17 @@ WHITELISTED_DOMAINS=(
     "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com"
     "desktop.docker.com"
     "api.docker.com"
-    # Note: Playwright browsers are pre-installed, no CDN access needed
 )
+
+# Add extra domains from environment variable if set
+if [ -n "$CLAUDE_UNCHAINED_WHITELIST_DOMAINS" ]; then
+    EXTRA_COUNT=0
+    for domain in $CLAUDE_UNCHAINED_WHITELIST_DOMAINS; do
+        WHITELISTED_DOMAINS+=("$domain")
+        EXTRA_COUNT=$((EXTRA_COUNT + 1))
+    done
+    echo "Added $EXTRA_COUNT extra domain(s) from CLAUDE_UNCHAINED_WHITELIST_DOMAINS"
+fi
 
 echo "Setting up network firewall..."
 
