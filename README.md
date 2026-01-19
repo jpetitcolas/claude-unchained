@@ -29,6 +29,12 @@ claude-isolated
 
 **Whitelist domains:** Edit `WHITELISTED_DOMAINS` in `entrypoint.sh:8`, then `make install`
 
+**Mount extra directories:** Set `CLAUDE_EXTRA_MOUNTS` for plugins or other paths:
+```bash
+# In ~/.bashrc or ~/.zshrc:
+export CLAUDE_EXTRA_MOUNTS="$HOME/dev/claude-config:$HOME/dev/claude-config:ro"
+```
+
 **Protect files:** Add deny rules to `~/.claude/settings.local.json`:
 ```json
 {

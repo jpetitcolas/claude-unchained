@@ -27,6 +27,15 @@ fi
 # Use --permission-mode bypassPermissions for YOLO mode (no prompts)
 WORKSPACE_PATH="$(pwd)"
 
+# Parse CLAUDE_EXTRA_MOUNTS environment variable
+# Format: space-separated mount specs (e.g., "/host/path:/container/path:ro /another:/path")
+EXTRA_MOUNT_FLAGS=""
+if [ -n "$CLAUDE_EXTRA_MOUNTS" ]; then
+    for mount in $CLAUDE_EXTRA_MOUNTS; do
+        EXTRA_MOUNT_FLAGS="$EXTRA_MOUNT_FLAGS -v $mount"
+    done
+fi
+
 docker run --rm $INTERACTIVE_FLAGS \
     --privileged \
     --hostname=claude-isolated \
@@ -37,4 +46,5 @@ docker run --rm $INTERACTIVE_FLAGS \
     -v "$WORKSPACE_PATH:$WORKSPACE_PATH" \
     -v "$HOME/.claude:/home/claude/.claude" \
     -v claude-pnpm-store:/home/claude/.local/share/pnpm/store \
+    $EXTRA_MOUNT_FLAGS \
     claude-isolated --permission-mode bypassPermissions "$@"
