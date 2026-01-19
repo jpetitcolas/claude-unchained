@@ -4,6 +4,15 @@
 
 set -e
 
+# Configuration constants
+readonly CONTAINER_USER="claude"
+readonly CONTAINER_HOME="/home/claude"
+readonly CONTAINER_CLAUDE_DIR="${CONTAINER_HOME}/.claude"
+readonly CONTAINER_IMAGE="claude-isolated"
+readonly DEFAULT_TERM="xterm-256color"
+readonly DEFAULT_COLORTERM="truecolor"
+readonly PNPM_VOLUME_NAME="claude-pnpm-store"
+
 # Ensure we have a workspace to mount
 if [ ! -d "$(pwd)" ]; then
     echo "Error: Current directory does not exist"
@@ -27,47 +36,57 @@ fi
 # Use --permission-mode bypassPermissions for YOLO mode (no prompts)
 WORKSPACE_PATH="$(pwd)"
 
-# Load configuration from files (local overrides global)
-# Priority: local config > global config
+# Configuration variables (populated from JSON config files)
 CONFIG_WHITELIST_DOMAINS=""
 CONFIG_SSH_KEY_PATH=""
 CONFIG_VOLUMES=""
 CONFIG_GH_TOKEN=""
 CONFIG_GH_USER=""
 
+# Helper to extract a single value from JSON config
+extract_config_value() {
+    local config_file="$1"
+    local jq_query="$2"
+    jq -r "$jq_query // empty" "$config_file" 2>/dev/null
+}
+
+# Helper to extract array values from JSON config
+extract_config_array() {
+    local config_file="$1"
+    local jq_query="$2"
+    jq -r "$jq_query" "$config_file" 2>/dev/null | tr '\n' ' '
+}
+
 # Function to merge config from a JSON file
 load_config() {
     local config_file="$1"
-    if [ -f "$config_file" ] && command -v jq >/dev/null 2>&1; then
-        # Read whitelisted domains
-        local domains=$(jq -r '.networking.whitelisted_domains[]? // empty' "$config_file" 2>/dev/null | tr '\n' ' ')
-        if [ -n "$domains" ]; then
-            CONFIG_WHITELIST_DOMAINS="$CONFIG_WHITELIST_DOMAINS $domains"
-        fi
 
-        # Read SSH key path
-        local ssh_key=$(jq -r '.ssh.keyPath? // empty' "$config_file" 2>/dev/null)
-        if [ -n "$ssh_key" ]; then
-            CONFIG_SSH_KEY_PATH="$ssh_key"
-        fi
+    # Skip if file doesn't exist
+    [ ! -f "$config_file" ] && return 0
 
-        # Read GitHub token and user
-        local gh_token=$(jq -r '.github.token? // empty' "$config_file" 2>/dev/null)
-        if [ -n "$gh_token" ]; then
-            CONFIG_GH_TOKEN="$gh_token"
-        fi
-
-        local gh_user=$(jq -r '.github.user? // empty' "$config_file" 2>/dev/null)
-        if [ -n "$gh_user" ]; then
-            CONFIG_GH_USER="$gh_user"
-        fi
-
-        # Read volumes
-        local volumes=$(jq -r '.volumes[]? | "\(.host):\(.container)" + (if .readonly then ":ro" else "" end)' "$config_file" 2>/dev/null | tr '\n' ' ')
-        if [ -n "$volumes" ]; then
-            CONFIG_VOLUMES="$CONFIG_VOLUMES $volumes"
-        fi
+    # Skip if jq is not available
+    if ! command -v jq >/dev/null 2>&1; then
+        return 0
     fi
+
+    # Read whitelisted domains
+    local domains=$(extract_config_array "$config_file" '.networking.whitelisted_domains[]? // empty')
+    [ -n "$domains" ] && CONFIG_WHITELIST_DOMAINS="$CONFIG_WHITELIST_DOMAINS $domains"
+
+    # Read SSH key path
+    local ssh_key=$(extract_config_value "$config_file" '.ssh.keyPath')
+    [ -n "$ssh_key" ] && CONFIG_SSH_KEY_PATH="$ssh_key"
+
+    # Read GitHub token and user
+    local gh_token=$(extract_config_value "$config_file" '.github.token')
+    [ -n "$gh_token" ] && CONFIG_GH_TOKEN="$gh_token"
+
+    local gh_user=$(extract_config_value "$config_file" '.github.user')
+    [ -n "$gh_user" ] && CONFIG_GH_USER="$gh_user"
+
+    # Read volumes
+    local volumes=$(jq -r '.volumes[]? | "\(.host):\(.container)" + (if .readonly then ":ro" else "" end)' "$config_file" 2>/dev/null | tr '\n' ' ')
+    [ -n "$volumes" ] && CONFIG_VOLUMES="$CONFIG_VOLUMES $volumes"
 }
 
 # Load configs in priority order (later configs override earlier ones):
@@ -80,95 +99,124 @@ load_config "$HOME/.claude-unchained.config.local.json"
 load_config "./.claude-unchained.config.json"
 load_config "./.claude-unchained.config.local.json"
 
-# Parse volumes from config
-# Format: space-separated mount specs (e.g., "/host/path:/container/path:ro /another:/path")
-EXTRA_MOUNT_FLAGS=""
-for mount in $CONFIG_VOLUMES; do
-    if [ -n "$mount" ]; then
-        EXTRA_MOUNT_FLAGS="$EXTRA_MOUNT_FLAGS -v $mount"
+# Expand tilde in path
+expand_path() {
+    local path="$1"
+    echo "${path/#\~/$HOME}"
+}
+
+# Build SSH mount flags and return mount specs
+# Returns two values: mount_flags and key_name (separated by newline)
+build_ssh_mount_flags() {
+    [ -z "$CONFIG_SSH_KEY_PATH" ] && return 0
+
+    local key_path=$(expand_path "$CONFIG_SSH_KEY_PATH")
+
+    # Check if key file exists
+    [ ! -f "$key_path" ] && return 0
+
+    local key_name=$(basename "$key_path")
+    local mount_flags="-v $key_path:$CONTAINER_HOME/.ssh/$key_name:ro"
+
+    # Add public key if it exists
+    if [ -f "$key_path.pub" ]; then
+        mount_flags="$mount_flags -v $key_path.pub:$CONTAINER_HOME/.ssh/$key_name.pub:ro"
     fi
-done
 
-# Mount SSH key if specified in config
-SSH_MOUNT_FLAGS=""
-if [ -n "$CONFIG_SSH_KEY_PATH" ]; then
-    # Expand tilde in path
-    SSH_KEY_BASE="${CONFIG_SSH_KEY_PATH/#\~/$HOME}"
+    # Output both values (for consumption by caller)
+    echo "$mount_flags"
+    echo "$key_name"
+}
 
-    if [ -f "$SSH_KEY_BASE" ]; then
-        # Extract just the filename from the path for mounting
-        SSH_KEY_NAME=$(basename "$SSH_KEY_BASE")
-        SSH_MOUNT_FLAGS="-v $SSH_KEY_BASE:/home/claude/.ssh/$SSH_KEY_NAME:ro"
-        if [ -f "$SSH_KEY_BASE.pub" ]; then
-            SSH_MOUNT_FLAGS="$SSH_MOUNT_FLAGS -v $SSH_KEY_BASE.pub:/home/claude/.ssh/$SSH_KEY_NAME.pub:ro"
-        fi
-    fi
-fi
+# Set up GitHub CLI config from token
+setup_gh_config_from_token() {
+    local temp_dir=$(mktemp -d)
+    local gh_user="${CONFIG_GH_USER:-user}"
 
-# Mount GitHub CLI config
-GH_CONFIG_MOUNT=""
-GH_CONFIG_CLEANUP=""
-
-if [ -n "$CONFIG_GH_TOKEN" ]; then
-    # Generate temporary gh config directory from JSON config
-    # User field is optional - use placeholder if not provided
-    GH_USER="${CONFIG_GH_USER:-user}"
-    GH_CONFIG_DIR=$(mktemp -d)
-    GH_CONFIG_CLEANUP="$GH_CONFIG_DIR"
-
-    # Create gh config directory structure
-    mkdir -p "$GH_CONFIG_DIR"
-    cat > "$GH_CONFIG_DIR/hosts.yml" << EOF
+    cat > "$temp_dir/hosts.yml" << EOF
 github.com:
-    user: $GH_USER
+    user: $gh_user
     oauth_token: $CONFIG_GH_TOKEN
     git_protocol: ssh
 EOF
-    # Mount as writable - gh CLI needs to write during migration
-    # The container is ephemeral anyway, so changes are discarded on exit
-    GH_CONFIG_MOUNT="-v $GH_CONFIG_DIR:/home/claude/.config/gh"
-elif [ -f "$HOME/.config/gh/hosts.yml" ]; then
-    # Fall back to global gh config (writable to allow gh CLI migration)
-    GH_CONFIG_MOUNT="-v $HOME/.config/gh:/home/claude/.config/gh"
-fi
+
+    echo "$temp_dir"
+}
+
+# Build GitHub CLI config mount flags
+# Returns two values: mount_flags and cleanup_dir (separated by newline)
+setup_gh_config_mount() {
+    if [ -n "$CONFIG_GH_TOKEN" ]; then
+        # Generate temporary gh config from token
+        local gh_config_dir=$(setup_gh_config_from_token)
+        echo "-v $gh_config_dir:$CONTAINER_HOME/.config/gh"
+        echo "$gh_config_dir"
+    elif [ -f "$HOME/.config/gh/hosts.yml" ]; then
+        # Fall back to global gh config (writable to allow gh CLI migration)
+        echo "-v $HOME/.config/gh:$CONTAINER_HOME/.config/gh"
+        echo ""
+    fi
+}
+
+# Parse volumes from config and build mount flags
+build_extra_mount_flags() {
+    local mount_flags=""
+
+    for mount_spec in $CONFIG_VOLUMES; do
+        [ -n "$mount_spec" ] && mount_flags="$mount_flags -v $mount_spec"
+    done
+
+    echo "$mount_flags"
+}
+
+# Set up SSH mounts
+SSH_MOUNT_OUTPUT=$(build_ssh_mount_flags)
+SSH_MOUNT_FLAGS=$(echo "$SSH_MOUNT_OUTPUT" | head -n 1)
+SSH_KEY_NAME=$(echo "$SSH_MOUNT_OUTPUT" | tail -n 1)
+
+# Set up GitHub CLI config
+GH_CONFIG_OUTPUT=$(setup_gh_config_mount)
+GH_CONFIG_MOUNT=$(echo "$GH_CONFIG_OUTPUT" | head -n 1)
+GH_CONFIG_CLEANUP=$(echo "$GH_CONFIG_OUTPUT" | tail -n 1)
+
+# Parse extra volume mounts
+EXTRA_MOUNT_FLAGS=$(build_extra_mount_flags)
 
 # Build the docker command as an array to handle spaces correctly
 DOCKER_CMD=(
     docker run --rm $INTERACTIVE_FLAGS
     --privileged
     --hostname=claude-isolated
-    -e CLAUDE_CONFIG_DIR=/home/claude/.claude
+    -e "CLAUDE_CONFIG_DIR=$CONTAINER_CLAUDE_DIR"
     -e "CLAUDE_UNCHAINED_WHITELIST_DOMAINS=${CONFIG_WHITELIST_DOMAINS}"
-    -e "TERM=${TERM:-xterm-256color}"
-    -e "COLORTERM=${COLORTERM:-truecolor}"
+    -e "TERM=${TERM:-$DEFAULT_TERM}"
+    -e "COLORTERM=${COLORTERM:-$DEFAULT_COLORTERM}"
 )
 
 # Add GIT_SSH_COMMAND if SSH key is configured
-if [ -n "$CONFIG_SSH_KEY_PATH" ] && [ -f "$SSH_KEY_BASE" ]; then
-    DOCKER_CMD+=(-e "GIT_SSH_COMMAND=ssh -i /home/claude/.ssh/$SSH_KEY_NAME -o IdentitiesOnly=yes")
+if [ -n "$SSH_KEY_NAME" ]; then
+    DOCKER_CMD+=(-e "GIT_SSH_COMMAND=ssh -i $CONTAINER_HOME/.ssh/$SSH_KEY_NAME -o IdentitiesOnly=yes")
 fi
 
 # Add remaining arguments
 DOCKER_CMD+=(
     -w "$WORKSPACE_PATH"
     -v "$WORKSPACE_PATH:$WORKSPACE_PATH"
-    -v "$HOME/.claude:/home/claude/.claude"
-    -v "$HOME/.gitconfig:/home/claude/.gitconfig:ro"
-    -v claude-pnpm-store:/home/claude/.local/share/pnpm/store
+    -v "$HOME/.claude:$CONTAINER_CLAUDE_DIR"
+    -v "$HOME/.gitconfig:$CONTAINER_HOME/.gitconfig:ro"
+    -v "$PNPM_VOLUME_NAME:$CONTAINER_HOME/.local/share/pnpm/store"
 )
 
 # Add dynamic mount flags
-for flag in $SSH_MOUNT_FLAGS $GH_CONFIG_MOUNT $EXTRA_MOUNT_FLAGS; do
-    [ -n "$flag" ] && DOCKER_CMD+=($flag)
+for mount_spec in $SSH_MOUNT_FLAGS $GH_CONFIG_MOUNT $EXTRA_MOUNT_FLAGS; do
+    [ -n "$mount_spec" ] && DOCKER_CMD+=($mount_spec)
 done
 
 # Add image and command
-DOCKER_CMD+=(claude-isolated --permission-mode bypassPermissions "$@")
+DOCKER_CMD+=("$CONTAINER_IMAGE" --permission-mode bypassPermissions "$@")
 
 # Execute the command
 "${DOCKER_CMD[@]}"
 
 # Cleanup temporary files
-if [ -n "$GH_CONFIG_CLEANUP" ]; then
-    rm -rf "$GH_CONFIG_CLEANUP"
-fi
+[ -n "$GH_CONFIG_CLEANUP" ] && rm -rf "$GH_CONFIG_CLEANUP"
