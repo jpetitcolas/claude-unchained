@@ -21,6 +21,8 @@ WHITELISTED_DOMAINS=(
     # PyPI
     "pypi.org"
     "files.pythonhosted.org"
+    # Prisma
+    "binaries.prisma.sh"
     # Docker Hub - Official allowlist from https://docs.docker.com/desktop/setup/allow-list/
     "auth.docker.io"
     "login.docker.com"

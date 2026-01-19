@@ -29,7 +29,9 @@ RUN mkdir -p /etc/apt/keyrings && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Install pnpm globally
+# Install pnpm globally and configure global store location
+ENV PNPM_HOME="/home/claude/.local/share/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
 RUN npm install -g pnpm
 
 # Install Docker Engine (full daemon) and Docker Compose for Docker-in-Docker
@@ -111,7 +113,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Set up Claude Code config directory and .local/bin for claude user
 # Also transfer ownership of Playwright browsers to claude user
-RUN mkdir -p /home/claude/.claude /home/claude/.local/bin /home/claude/.local/share && \
+# Create pnpm store directory with proper permissions
+RUN mkdir -p /home/claude/.claude /home/claude/.local/bin /home/claude/.local/share /home/claude/.local/share/pnpm/store && \
     ln -s /usr/local/bin/claude /home/claude/.local/bin/claude && \
     ln -s /usr/local/share/claude /home/claude/.local/share/claude && \
     chown -R claude:claude /home/claude /ms-playwright
