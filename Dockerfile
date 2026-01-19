@@ -21,6 +21,14 @@ RUN apt-get update && apt-get install -y \
     make \
     && rm -rf /var/lib/apt/lists/*
 
+# Install GitHub CLI
+RUN mkdir -p -m 755 /etc/apt/keyrings && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y gh && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install Node.js 20 (required for Claude Code)
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
@@ -118,6 +126,13 @@ RUN mkdir -p /home/claude/.claude /home/claude/.local/bin /home/claude/.local/sh
     ln -s /usr/local/bin/claude /home/claude/.local/bin/claude && \
     ln -s /usr/local/share/claude /home/claude/.local/share/claude && \
     chown -R claude:claude /home/claude /ms-playwright
+
+# Add GitHub's SSH host keys to known_hosts for claude user
+RUN mkdir -p /home/claude/.ssh && \
+    ssh-keyscan github.com >> /home/claude/.ssh/known_hosts 2>/dev/null && \
+    chown -R claude:claude /home/claude/.ssh && \
+    chmod 700 /home/claude/.ssh && \
+    chmod 644 /home/claude/.ssh/known_hosts
 
 WORKDIR /workspace
 

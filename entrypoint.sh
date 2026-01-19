@@ -13,6 +13,7 @@ WHITELISTED_DOMAINS=(
     "claude.ai"
     # GitHub
     "github.com"
+    "ssh.github.com"
     "raw.githubusercontent.com"
     "api.github.com"
     # Docker Hub - Official allowlist from https://docs.docker.com/desktop/setup/allow-list/
@@ -72,7 +73,7 @@ for domain in "${WHITELISTED_DOMAINS[@]}"; do
                 iptables -A OUTPUT -d "$ip" -p tcp --dport 80 -j ACCEPT
                 iptables -A OUTPUT -d "$ip" -p tcp --dport 443 -j ACCEPT
                 # Allow SSH for GitHub (git push/pull over SSH)
-                if [ "$domain" = "github.com" ]; then
+                if [ "$domain" = "github.com" ] || [ "$domain" = "ssh.github.com" ]; then
                     iptables -A OUTPUT -d "$ip" -p tcp --dport 22 -j ACCEPT
                 fi
             fi
@@ -89,7 +90,7 @@ for domain in "${WHITELISTED_DOMAINS[@]}"; do
                 ip6tables -A OUTPUT -d "$ip" -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
                 ip6tables -A OUTPUT -d "$ip" -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
                 # Allow SSH for GitHub (git push/pull over SSH)
-                if [ "$domain" = "github.com" ]; then
+                if [ "$domain" = "github.com" ] || [ "$domain" = "ssh.github.com" ]; then
                     ip6tables -A OUTPUT -d "$ip" -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
                 fi
             fi

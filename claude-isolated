@@ -32,6 +32,8 @@ WORKSPACE_PATH="$(pwd)"
 CONFIG_WHITELIST_DOMAINS=""
 CONFIG_SSH_KEY_PATH=""
 CONFIG_VOLUMES=""
+CONFIG_GH_TOKEN=""
+CONFIG_GH_USER=""
 
 # Function to merge config from a JSON file
 load_config() {
@@ -49,6 +51,17 @@ load_config() {
             CONFIG_SSH_KEY_PATH="$ssh_key"
         fi
 
+        # Read GitHub token and user
+        local gh_token=$(jq -r '.github.token? // empty' "$config_file" 2>/dev/null)
+        if [ -n "$gh_token" ]; then
+            CONFIG_GH_TOKEN="$gh_token"
+        fi
+
+        local gh_user=$(jq -r '.github.user? // empty' "$config_file" 2>/dev/null)
+        if [ -n "$gh_user" ]; then
+            CONFIG_GH_USER="$gh_user"
+        fi
+
         # Read volumes
         local volumes=$(jq -r '.volumes[]? | "\(.host):\(.container)" + (if .readonly then ":ro" else "" end)' "$config_file" 2>/dev/null | tr '\n' ' ')
         if [ -n "$volumes" ]; then
@@ -57,9 +70,15 @@ load_config() {
     fi
 }
 
-# Load global config first, then local config (local overrides global)
+# Load configs in priority order (later configs override earlier ones):
+# 1. Global base config (lowest priority)
+# 2. Global local config with secrets
+# 3. Project base config (can be committed)
+# 4. Project local config with secrets (highest priority)
 load_config "$HOME/.claude-unchained.config.json"
+load_config "$HOME/.claude-unchained.config.local.json"
 load_config "./.claude-unchained.config.json"
+load_config "./.claude-unchained.config.local.json"
 
 # Parse volumes from config
 # Format: space-separated mount specs (e.g., "/host/path:/container/path:ro /another:/path")
@@ -77,25 +96,79 @@ if [ -n "$CONFIG_SSH_KEY_PATH" ]; then
     SSH_KEY_BASE="${CONFIG_SSH_KEY_PATH/#\~/$HOME}"
 
     if [ -f "$SSH_KEY_BASE" ]; then
-        SSH_MOUNT_FLAGS="-v $SSH_KEY_BASE:/home/claude/.ssh/id_ed25519:ro"
+        # Extract just the filename from the path for mounting
+        SSH_KEY_NAME=$(basename "$SSH_KEY_BASE")
+        SSH_MOUNT_FLAGS="-v $SSH_KEY_BASE:/home/claude/.ssh/$SSH_KEY_NAME:ro"
         if [ -f "$SSH_KEY_BASE.pub" ]; then
-            SSH_MOUNT_FLAGS="$SSH_MOUNT_FLAGS -v $SSH_KEY_BASE.pub:/home/claude/.ssh/id_ed25519.pub:ro"
+            SSH_MOUNT_FLAGS="$SSH_MOUNT_FLAGS -v $SSH_KEY_BASE.pub:/home/claude/.ssh/$SSH_KEY_NAME.pub:ro"
         fi
     fi
 fi
 
-docker run --rm $INTERACTIVE_FLAGS \
-    --privileged \
-    --hostname=claude-isolated \
-    -e CLAUDE_CONFIG_DIR=/home/claude/.claude \
-    -e CLAUDE_UNCHAINED_WHITELIST_DOMAINS="${CONFIG_WHITELIST_DOMAINS}" \
-    -e TERM="${TERM:-xterm-256color}" \
-    -e COLORTERM="${COLORTERM:-truecolor}" \
-    -w "$WORKSPACE_PATH" \
-    -v "$WORKSPACE_PATH:$WORKSPACE_PATH" \
-    -v "$HOME/.claude:/home/claude/.claude" \
-    -v "$HOME/.gitconfig:/home/claude/.gitconfig:ro" \
-    -v claude-pnpm-store:/home/claude/.local/share/pnpm/store \
-    $SSH_MOUNT_FLAGS \
-    $EXTRA_MOUNT_FLAGS \
-    claude-isolated --permission-mode bypassPermissions "$@"
+# Mount GitHub CLI config
+GH_CONFIG_MOUNT=""
+GH_CONFIG_CLEANUP=""
+
+if [ -n "$CONFIG_GH_TOKEN" ]; then
+    # Generate temporary gh config directory from JSON config
+    # User field is optional - use placeholder if not provided
+    GH_USER="${CONFIG_GH_USER:-user}"
+    GH_CONFIG_DIR=$(mktemp -d)
+    GH_CONFIG_CLEANUP="$GH_CONFIG_DIR"
+
+    # Create gh config directory structure
+    mkdir -p "$GH_CONFIG_DIR"
+    cat > "$GH_CONFIG_DIR/hosts.yml" << EOF
+github.com:
+    user: $GH_USER
+    oauth_token: $CONFIG_GH_TOKEN
+    git_protocol: ssh
+EOF
+    # Mount as writable - gh CLI needs to write during migration
+    # The container is ephemeral anyway, so changes are discarded on exit
+    GH_CONFIG_MOUNT="-v $GH_CONFIG_DIR:/home/claude/.config/gh"
+elif [ -f "$HOME/.config/gh/hosts.yml" ]; then
+    # Fall back to global gh config (writable to allow gh CLI migration)
+    GH_CONFIG_MOUNT="-v $HOME/.config/gh:/home/claude/.config/gh"
+fi
+
+# Build the docker command as an array to handle spaces correctly
+DOCKER_CMD=(
+    docker run --rm $INTERACTIVE_FLAGS
+    --privileged
+    --hostname=claude-isolated
+    -e CLAUDE_CONFIG_DIR=/home/claude/.claude
+    -e "CLAUDE_UNCHAINED_WHITELIST_DOMAINS=${CONFIG_WHITELIST_DOMAINS}"
+    -e "TERM=${TERM:-xterm-256color}"
+    -e "COLORTERM=${COLORTERM:-truecolor}"
+)
+
+# Add GIT_SSH_COMMAND if SSH key is configured
+if [ -n "$CONFIG_SSH_KEY_PATH" ] && [ -f "$SSH_KEY_BASE" ]; then
+    DOCKER_CMD+=(-e "GIT_SSH_COMMAND=ssh -i /home/claude/.ssh/$SSH_KEY_NAME -o IdentitiesOnly=yes")
+fi
+
+# Add remaining arguments
+DOCKER_CMD+=(
+    -w "$WORKSPACE_PATH"
+    -v "$WORKSPACE_PATH:$WORKSPACE_PATH"
+    -v "$HOME/.claude:/home/claude/.claude"
+    -v "$HOME/.gitconfig:/home/claude/.gitconfig:ro"
+    -v claude-pnpm-store:/home/claude/.local/share/pnpm/store
+)
+
+# Add dynamic mount flags
+for flag in $SSH_MOUNT_FLAGS $GH_CONFIG_MOUNT $EXTRA_MOUNT_FLAGS; do
+    [ -n "$flag" ] && DOCKER_CMD+=($flag)
+done
+
+# Add image and command
+DOCKER_CMD+=(claude-isolated --permission-mode bypassPermissions "$@")
+
+# Execute the command
+"${DOCKER_CMD[@]}"
+
+# Cleanup temporary files
+if [ -n "$GH_CONFIG_CLEANUP" ]; then
+    rm -rf "$GH_CONFIG_CLEANUP"
+fi

@@ -1,0 +1,2 @@
+# Claude Unchained local config with secrets (SSH keys, tokens)
+.claude-unchained.config.local.json
