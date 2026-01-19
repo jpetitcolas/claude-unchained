@@ -95,9 +95,6 @@ iptables -A OUTPUT -j LOG --log-prefix "BLOCKED: " --log-level 4
 
 echo "Firewall configured successfully!"
 echo ""
-echo "Whitelisted domains:"
-printf '  - %s\n' "${WHITELISTED_DOMAINS[@]}"
-echo ""
 
 # Ensure .claude directory is writable by claude user
 chown -R claude:claude /home/claude/.claude 2>/dev/null || true
