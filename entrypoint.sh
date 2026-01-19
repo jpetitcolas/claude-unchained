@@ -6,17 +6,32 @@ set -e
 
 # Hardcoded whitelist of allowed domains
 WHITELISTED_DOMAINS=(
+    # Claude Code
     "code.claude.com"
     "api.anthropic.com"
     "platform.claude.com"
     "claude.ai"
+    # GitHub
     "github.com"
     "raw.githubusercontent.com"
     "api.github.com"
+    # NPM
     "npmjs.com"
     "registry.npmjs.org"
+    # PyPI
     "pypi.org"
     "files.pythonhosted.org"
+    # Docker Hub - Official allowlist from https://docs.docker.com/desktop/setup/allow-list/
+    "auth.docker.io"
+    "login.docker.com"
+    "auth.docker.com"
+    "hub.docker.com"
+    "registry-1.docker.io"
+    "production.cloudflare.docker.com"
+    "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com"
+    "desktop.docker.com"
+    "api.docker.com"
+    # Note: Playwright browsers are pre-installed, no CDN access needed
 )
 
 echo "Setting up network firewall..."
@@ -84,11 +99,26 @@ echo "Whitelisted domains:"
 printf '  - %s\n' "${WHITELISTED_DOMAINS[@]}"
 echo ""
 
-# Ensure claude user owns their home directory and .claude config
+# Ensure .claude directory is writable by claude user
 chown -R claude:claude /home/claude/.claude 2>/dev/null || true
 
+# Start Docker daemon in background for Docker-in-Docker support
+# Use vfs storage driver to avoid overlayfs whiteout issues in WSL2
+echo "Starting Docker daemon..."
+dockerd --storage-driver=vfs > /var/log/docker.log 2>&1 &
+DOCKER_PID=$!
+
+# Wait for Docker to be ready
+echo "Waiting for Docker to be ready..."
+timeout 30 bash -c 'until docker info > /dev/null 2>&1; do sleep 0.5; done' || {
+    echo "ERROR: Docker daemon failed to start"
+    exit 1
+}
+echo "Docker daemon ready!"
+echo ""
+
 # Switch to claude user and execute the command passed to the container (Claude Code)
-# We need to run as root for iptables setup, then drop to claude user
+# We need to run as root for iptables setup and Docker daemon, then drop to claude user
 # Using gosu instead of su for better signal handling and proper stdin/stdout/stderr
 # Set HOME explicitly since gosu doesn't update environment variables
 # Working directory is set by docker -w flag

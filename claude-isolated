@@ -17,24 +17,23 @@ else
     INTERACTIVE_FLAGS=""
 fi
 
-# Run Claude Code in isolated container
-# Mount host .claude for auth and config (sessions filtered by workspace path)
-# --cap-add=NET_ADMIN is required for iptables firewall configuration
-# CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1 allows autonomous operation within the isolated container
-# CLAUDE_CONFIG_DIR tells Claude Code where to find config files
+# Run Claude Code in isolated container with Docker-in-Docker
+# --privileged is required for Docker daemon to run inside container
 # --hostname=claude-isolated provides consistent identity across container runs
 # Mount workspace at same path as host so Claude can track sessions per project
+# Mount host .claude directory directly (sessions, todos, deny rules all work)
+# Each container instance runs its own Docker daemon with isolated network/ports
 # Pass through TERM and COLORTERM for proper color support
+# Use --permission-mode bypassPermissions for YOLO mode (no prompts)
 WORKSPACE_PATH="$(pwd)"
+
 docker run --rm $INTERACTIVE_FLAGS \
-    --cap-add=NET_ADMIN \
+    --privileged \
     --hostname=claude-isolated \
-    -e CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1 \
     -e CLAUDE_CONFIG_DIR=/home/claude/.claude \
-    -e DEVCONTAINER=true \
     -e TERM="${TERM:-xterm-256color}" \
     -e COLORTERM="${COLORTERM:-truecolor}" \
     -w "$WORKSPACE_PATH" \
     -v "$WORKSPACE_PATH:$WORKSPACE_PATH" \
     -v "$HOME/.claude:/home/claude/.claude" \
-    claude-isolated "$@"
+    claude-isolated --permission-mode bypassPermissions "$@"
