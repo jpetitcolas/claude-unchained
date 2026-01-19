@@ -71,6 +71,10 @@ for domain in "${WHITELISTED_DOMAINS[@]}"; do
                 # Allow HTTP and HTTPS to this IPv4
                 iptables -A OUTPUT -d "$ip" -p tcp --dport 80 -j ACCEPT
                 iptables -A OUTPUT -d "$ip" -p tcp --dport 443 -j ACCEPT
+                # Allow SSH for GitHub (git push/pull over SSH)
+                if [ "$domain" = "github.com" ]; then
+                    iptables -A OUTPUT -d "$ip" -p tcp --dport 22 -j ACCEPT
+                fi
             fi
         done <<< "$IPV4S"
     fi
@@ -84,6 +88,10 @@ for domain in "${WHITELISTED_DOMAINS[@]}"; do
                 # Allow HTTP and HTTPS to this IPv6
                 ip6tables -A OUTPUT -d "$ip" -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
                 ip6tables -A OUTPUT -d "$ip" -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+                # Allow SSH for GitHub (git push/pull over SSH)
+                if [ "$domain" = "github.com" ]; then
+                    ip6tables -A OUTPUT -d "$ip" -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
+                fi
             fi
         done <<< "$IPV6S"
     fi
@@ -101,6 +109,15 @@ echo ""
 
 # Ensure .claude directory is writable by claude user
 chown -R claude:claude /home/claude/.claude 2>/dev/null || true
+
+# Fix SSH permissions (SSH requires strict permissions)
+# Only set up if SSH key exists
+# Note: Files are mounted read-only, so we only create the directory
+if [ -f /home/claude/.ssh/id_ed25519 ]; then
+    mkdir -p /home/claude/.ssh
+    chown claude:claude /home/claude/.ssh 2>/dev/null || true
+    chmod 700 /home/claude/.ssh 2>/dev/null || true
+fi
 
 # Start Docker daemon in background for Docker-in-Docker support
 # Use vfs storage driver to avoid overlayfs whiteout issues in WSL2

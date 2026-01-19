@@ -27,25 +27,75 @@ fi
 # Use --permission-mode bypassPermissions for YOLO mode (no prompts)
 WORKSPACE_PATH="$(pwd)"
 
-# Parse CLAUDE_UNCHAINED_EXTRA_MOUNTS environment variable
+# Load configuration from files (local overrides global)
+# Priority: local config > global config
+CONFIG_WHITELIST_DOMAINS=""
+CONFIG_SSH_KEY_PATH=""
+CONFIG_VOLUMES=""
+
+# Function to merge config from a JSON file
+load_config() {
+    local config_file="$1"
+    if [ -f "$config_file" ] && command -v jq >/dev/null 2>&1; then
+        # Read whitelisted domains
+        local domains=$(jq -r '.networking.whitelisted_domains[]? // empty' "$config_file" 2>/dev/null | tr '\n' ' ')
+        if [ -n "$domains" ]; then
+            CONFIG_WHITELIST_DOMAINS="$CONFIG_WHITELIST_DOMAINS $domains"
+        fi
+
+        # Read SSH key path
+        local ssh_key=$(jq -r '.ssh.keyPath? // empty' "$config_file" 2>/dev/null)
+        if [ -n "$ssh_key" ]; then
+            CONFIG_SSH_KEY_PATH="$ssh_key"
+        fi
+
+        # Read volumes
+        local volumes=$(jq -r '.volumes[]? | "\(.host):\(.container)" + (if .readonly then ":ro" else "" end)' "$config_file" 2>/dev/null | tr '\n' ' ')
+        if [ -n "$volumes" ]; then
+            CONFIG_VOLUMES="$CONFIG_VOLUMES $volumes"
+        fi
+    fi
+}
+
+# Load global config first, then local config (local overrides global)
+load_config "$HOME/.claude-unchained.config.json"
+load_config "./.claude-unchained.config.json"
+
+# Parse volumes from config
 # Format: space-separated mount specs (e.g., "/host/path:/container/path:ro /another:/path")
 EXTRA_MOUNT_FLAGS=""
-if [ -n "$CLAUDE_UNCHAINED_EXTRA_MOUNTS" ]; then
-    for mount in $CLAUDE_UNCHAINED_EXTRA_MOUNTS; do
+for mount in $CONFIG_VOLUMES; do
+    if [ -n "$mount" ]; then
         EXTRA_MOUNT_FLAGS="$EXTRA_MOUNT_FLAGS -v $mount"
-    done
+    fi
+done
+
+# Mount SSH key if specified in config
+SSH_MOUNT_FLAGS=""
+if [ -n "$CONFIG_SSH_KEY_PATH" ]; then
+    # Expand tilde in path
+    SSH_KEY_BASE="${CONFIG_SSH_KEY_PATH/#\~/$HOME}"
+
+    if [ -f "$SSH_KEY_BASE" ]; then
+        SSH_MOUNT_FLAGS="-v $SSH_KEY_BASE:/home/claude/.ssh/id_ed25519:ro"
+        if [ -f "$SSH_KEY_BASE.pub" ]; then
+            SSH_MOUNT_FLAGS="$SSH_MOUNT_FLAGS -v $SSH_KEY_BASE.pub:/home/claude/.ssh/id_ed25519.pub:ro"
+        fi
+    fi
 fi
 
 docker run --rm $INTERACTIVE_FLAGS \
     --privileged \
     --hostname=claude-isolated \
     -e CLAUDE_CONFIG_DIR=/home/claude/.claude \
-    -e CLAUDE_UNCHAINED_WHITELIST_DOMAINS="${CLAUDE_UNCHAINED_WHITELIST_DOMAINS:-}" \
+    -e CLAUDE_UNCHAINED_WHITELIST_DOMAINS="${CONFIG_WHITELIST_DOMAINS}" \
     -e TERM="${TERM:-xterm-256color}" \
     -e COLORTERM="${COLORTERM:-truecolor}" \
     -w "$WORKSPACE_PATH" \
     -v "$WORKSPACE_PATH:$WORKSPACE_PATH" \
     -v "$HOME/.claude:/home/claude/.claude" \
+    -v "$HOME/.gitconfig:/home/claude/.gitconfig:ro" \
     -v claude-pnpm-store:/home/claude/.local/share/pnpm/store \
+    $SSH_MOUNT_FLAGS \
     $EXTRA_MOUNT_FLAGS \
     claude-isolated --permission-mode bypassPermissions "$@"

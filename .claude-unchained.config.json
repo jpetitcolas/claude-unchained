@@ -1,0 +1,5 @@
+{
+  "ssh": {
+    "keyPath": "~/.ssh/claude-unchained-deploy"
+  }
+}
