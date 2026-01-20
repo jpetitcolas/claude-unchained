@@ -62,7 +62,9 @@ load_config() {
     local config_file="$1"
 
     # Skip if file doesn't exist
-    [ ! -f "$config_file" ] && return 0
+    if [ ! -f "$config_file" ]; then
+        return 0
+    fi
 
     # Skip if jq is not available
     if ! command -v jq >/dev/null 2>&1; then
@@ -87,6 +89,8 @@ load_config() {
     # Read volumes
     local volumes=$(jq -r '.volumes[]? | "\(.host):\(.container)" + (if .readonly then ":ro" else "" end)' "$config_file" 2>/dev/null | tr '\n' ' ')
     [ -n "$volumes" ] && CONFIG_VOLUMES="$CONFIG_VOLUMES $volumes"
+
+    return 0
 }
 
 # Load configs in priority order (later configs override earlier ones):
@@ -108,12 +112,17 @@ expand_path() {
 # Build SSH mount flags and return mount specs
 # Returns two values: mount_flags and key_name (separated by newline)
 build_ssh_mount_flags() {
-    [ -z "$CONFIG_SSH_KEY_PATH" ] && return 0
+
+    if [ -z "$CONFIG_SSH_KEY_PATH" ]; then
+        return 0
+    fi
 
     local key_path=$(expand_path "$CONFIG_SSH_KEY_PATH")
 
     # Check if key file exists
-    [ ! -f "$key_path" ] && return 0
+    if [ ! -f "$key_path" ]; then
+        return 0
+    fi
 
     local key_name=$(basename "$key_path")
     local mount_flags="-v $key_path:$CONTAINER_HOME/.ssh/$key_name:ro"
@@ -183,8 +192,14 @@ GH_CONFIG_CLEANUP=$(echo "$GH_CONFIG_OUTPUT" | tail -n 1)
 EXTRA_MOUNT_FLAGS=$(build_extra_mount_flags)
 
 # Build the docker command as an array to handle spaces correctly
-DOCKER_CMD=(
-    docker run --rm $INTERACTIVE_FLAGS
+DOCKER_CMD=(docker run --rm)
+
+# Add interactive flags if running in a TTY
+if [ -n "$INTERACTIVE_FLAGS" ]; then
+    DOCKER_CMD+=(-i -t)
+fi
+
+DOCKER_CMD+=(
     --privileged
     --hostname=claude-isolated
     -e "CLAUDE_CONFIG_DIR=$CONTAINER_CLAUDE_DIR"
@@ -217,6 +232,10 @@ DOCKER_CMD+=("$CONTAINER_IMAGE" --permission-mode bypassPermissions "$@")
 
 # Execute the command
 "${DOCKER_CMD[@]}"
+EXIT_CODE=$?
 
 # Cleanup temporary files
 [ -n "$GH_CONFIG_CLEANUP" ] && rm -rf "$GH_CONFIG_CLEANUP"
+
+# Exit with docker's exit code
+exit $EXIT_CODE
