@@ -2,25 +2,25 @@
 
 # Install: build image and install wrapper to /usr/local/bin
 install:
-	@echo "Building claude-isolated Docker image..."
-	@docker build -t claude-isolated .
+	@echo "Building claude-unchained Docker image..."
+	@docker build -t claude-unchained .
 	@echo "✓ Build complete!"
 	@echo ""
-	@echo "Installing claude-isolated to /usr/local/bin..."
+	@echo "Installing claude-unchained to /usr/local/bin..."
 	@if [ ! -f ~/.claude/.credentials.json ]; then \
 		echo "⚠ Warning: Claude credentials not found at ~/.claude/.credentials.json"; \
 		echo "Please run 'claude login' first if you haven't already."; \
 		echo ""; \
 	fi
-	@sudo install -m 755 claude-isolated /usr/local/bin/claude-isolated
+	@sudo install -m 755 claude-unchained /usr/local/bin/claude-unchained
 	@echo "✓ Installation complete!"
 	@echo ""
-	@echo "You can now run 'claude-isolated' from any directory."
+	@echo "You can now run 'claude-unchained' from any directory."
 
 # Uninstall: remove wrapper and optionally Docker volumes
 uninstall:
-	@echo "Uninstalling claude-isolated..."
-	@sudo rm -f /usr/local/bin/claude-isolated
+	@echo "Uninstalling claude-unchained..."
+	@sudo rm -f /usr/local/bin/claude-unchained
 	@echo "✓ Removed from /usr/local/bin"
 	@echo ""
 	@read -p "Remove Docker volumes (session data)? [y/N] " confirm; \

@@ -16,14 +16,14 @@ A containerized Claude Code setup that:
 
 ```bash
 claude login    # First time only - login on host
-make install    # Build image and install claude-isolated wrapper
+make install    # Build image and install claude-unchained wrapper
 ```
 
 ## Run
 
 ```bash
 cd /your/project
-claude-isolated
+claude-unchained
 ```
 
 ## Configuration

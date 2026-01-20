@@ -1,6 +1,6 @@
 #!/bin/bash
-# Claude Code Isolated - Wrapper script for containerized Claude Code
-# Usage: ./claude-isolated [claude arguments...]
+# Claude Code Unchained - Wrapper script for containerized Claude Code
+# Usage: ./claude-unchained [claude arguments...]
 
 set -e
 
@@ -8,7 +8,7 @@ set -e
 readonly CONTAINER_USER="claude"
 readonly CONTAINER_HOME="/home/claude"
 readonly CONTAINER_CLAUDE_DIR="${CONTAINER_HOME}/.claude"
-readonly CONTAINER_IMAGE="claude-isolated"
+readonly CONTAINER_IMAGE="claude-unchained"
 readonly DEFAULT_TERM="xterm-256color"
 readonly DEFAULT_COLORTERM="truecolor"
 readonly PNPM_VOLUME_NAME="claude-pnpm-store"
@@ -28,7 +28,7 @@ fi
 
 # Run Claude Code in isolated container with Docker-in-Docker
 # --privileged is required for Docker daemon to run inside container
-# --hostname=claude-isolated provides consistent identity across container runs
+# --hostname=claude-unchained provides consistent identity across container runs
 # Mount workspace at same path as host so Claude can track sessions per project
 # Mount host .claude directory directly (sessions, todos, deny rules all work)
 # Each container instance runs its own Docker daemon with isolated network/ports
@@ -201,7 +201,7 @@ fi
 
 DOCKER_CMD+=(
     --privileged
-    --hostname=claude-isolated
+    --hostname=claude-unchained
     -e "CLAUDE_CONFIG_DIR=$CONTAINER_CLAUDE_DIR"
     -e "CLAUDE_UNCHAINED_WHITELIST_DOMAINS=${CONFIG_WHITELIST_DOMAINS}"
     -e "TERM=${TERM:-$DEFAULT_TERM}"
