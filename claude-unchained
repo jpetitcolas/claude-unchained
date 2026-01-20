@@ -202,7 +202,6 @@ fi
 DOCKER_CMD+=(
     --privileged
     --hostname=claude-unchained
-    -e "CLAUDE_CONFIG_DIR=$CONTAINER_CLAUDE_DIR"
     -e "CLAUDE_UNCHAINED_WHITELIST_DOMAINS=${CONFIG_WHITELIST_DOMAINS}"
     -e "TERM=${TERM:-$DEFAULT_TERM}"
     -e "COLORTERM=${COLORTERM:-$DEFAULT_COLORTERM}"
@@ -218,6 +217,7 @@ DOCKER_CMD+=(
     -w "$WORKSPACE_PATH"
     -v "$WORKSPACE_PATH:$WORKSPACE_PATH"
     -v "$HOME/.claude:$CONTAINER_CLAUDE_DIR"
+    -v "$HOME/.claude.json:$CONTAINER_HOME/.claude.json"
     -v "$HOME/.gitconfig:$CONTAINER_HOME/.gitconfig:ro"
     -v "$PNPM_VOLUME_NAME:$CONTAINER_HOME/.local/share/pnpm/store"
 )
@@ -234,8 +234,8 @@ DOCKER_CMD+=("$CONTAINER_IMAGE" --permission-mode bypassPermissions "$@")
 "${DOCKER_CMD[@]}"
 EXIT_CODE=$?
 
-# Cleanup temporary files
-[ -n "$GH_CONFIG_CLEANUP" ] && rm -rf "$GH_CONFIG_CLEANUP"
+# Cleanup temporary files (only if it's a valid path starting with /)
+[ -n "$GH_CONFIG_CLEANUP" ] && [[ "$GH_CONFIG_CLEANUP" == /* ]] && rm -rf "$GH_CONFIG_CLEANUP"
 
 # Exit with docker's exit code
 exit $EXIT_CODE
