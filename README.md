@@ -2,46 +2,62 @@
 
 Run Claude Code in an isolated Docker container with network firewall.
 
-## What is this?
+**Why use this?** Run Claude with full permissions in a completely isolated environment, allowing it to work efficiently without the dangers of damaging your system or leaking information to malicious websites.
 
-A containerized Claude Code setup that:
-- **Blocks network access** except whitelisted domains (iptables firewall)
-- **Restricts filesystem** to current project only
-- **Docker-in-Docker support** - isolated Docker stacks with no port conflicts
-- **SSH git push support** - your SSH keys and git config work seamlessly
-- **No permission prompts** - YOLO mode enabled automatically
-- **Shares sessions** - same session data across regular and isolated Claude
+- **Network firewall** - Only whitelisted domains accessible via iptables
+- **Filesystem isolation** - Claude only sees the current project directory
+- **Scoped GitHub access** - Fine-grained token limited to specific repositories
+- **SSH key isolation** - Only repository-specific deploy keys mounted
 
 ## Quick Start
 
 ```bash
-claude login    # First time only - login on host
-make install    # Build image and install claude-unchained wrapper
+make install        # Build image and install wrapper
+claude-unchained    # Launch isolated Claude in current project
 ```
 
-## Run
+## Setup
+
+### 1. Create GitHub Token
+
+[Create a fine-grained token](https://github.com/settings/tokens?type=beta) restricted to your repository. Claude Unchained cannot commit to any repository outside this scope.
+
+- **Repository access**: Select only the repository you want Claude to access
+- **Permissions**: Contents (Read/Write), Pull Requests (Read/Write), Issues (Read/Write)
+
+This token is only used for `gh` CLI commands.
+
+### 2. Create SSH Deploy Key
+
+Generate a repository-specific deploy key:
 
 ```bash
-cd /your/project
-claude-unchained
+REPO_NAME="my-repo-deploy"  # Change this to your repository name
+
+ssh-keygen -t ed25519 -f ~/.ssh/$REPO_NAME -C "$REPO_NAME"
+gh repo deploy-key add ~/.ssh/$REPO_NAME.pub --title "$REPO_NAME" --allow-write
+git config core.sshCommand "ssh -i ~/.ssh/$REPO_NAME -o IdentitiesOnly=yes"
 ```
 
-## Configuration
+This deploy key allows git to push/pull only in the current repository. Only this key is mounted in the container - Claude cannot access other SSH keys.
 
-Configure via JSON files. Use `.local.json` suffix for secrets (gitignored).
+### 3. Configure Project
 
-**Config files** (priority order, later overrides earlier):
-1. `~/.claude-unchained.config.json` - Global base config
-2. `~/.claude-unchained.config.local.json` - Global secrets
-3. `./.claude-unchained.config.json` - Project config (committable)
-4. `./.claude-unchained.config.local.json` - Project secrets (gitignored)
+**Sensitive data** (`.claude-unchained.config.local.json`, gitignored):
 
-**Default whitelist** (always enabled):
-- **Claude**: `code.claude.com`, `api.anthropic.com`, `platform.claude.com`, `claude.ai`
-- **GitHub**: `github.com`, `raw.githubusercontent.com`, `api.github.com`
-- **Docker Hub**: `auth.docker.io`, `login.docker.com`, `hub.docker.com`, `registry-1.docker.io`, etc.
+```json
+{
+  "github": {
+    "token": "github_pat_YOUR_FINE_GRAINED_TOKEN"
+  },
+  "ssh": {
+    "keyPath": "~/.ssh/my-repo-deploy"
+  }
+}
+```
 
-**Example: `.claude-unchained.config.json` (committable):**
+**Project configuration** (`.claude-unchained.config.json`, committable):
+
 ```json
 {
   "networking": {
@@ -53,75 +69,47 @@ Configure via JSON files. Use `.local.json` suffix for secrets (gitignored).
 }
 ```
 
-**Example: `.claude-unchained.config.local.json` (secrets, gitignored):**
-```json
-{
-  "ssh": {
-    "keyPath": "~/.ssh/my-repo-deploy"
-  },
-  "github": {
-    "token": "github_pat_YOUR_FINE_GRAINED_TOKEN"
-  }
-}
-```
+### 4. Protect Secrets in Claude Settings
 
-**Protect secrets:** Add deny rules to `~/.claude/settings.local.json`:
+Add to `~/.claude/settings.local.json` to prevent Claude from leaking your GitHub token to Anthropic servers:
+
 ```json
 {
   "permissions": {
     "deny": [
-      "Read(.env)",
-      "Read(**/*.key)",
       "Read(**/*.local.json)"
     ]
   }
 }
 ```
 
-## GitHub CLI Support
+You can now run `claude-unchained` in your project.
 
-The `gh` CLI is available in the container. For security, use a repo-specific fine-grained token instead of your global OAuth token.
+## What Does This Do?
 
-**Setup:**
-```bash
-# 1. Create fine-grained token at https://github.com/settings/tokens?type=beta
-#    - Select only the repository you want to grant access to
-#    - Grant permissions: Contents (Read/Write), Pull Requests (Read/Write), Issues (Read/Write)
+- **Network firewall** - Only whitelisted domains accessible (Claude, GitHub, Docker Hub always allowed)
+- **Filesystem isolation** - Claude only sees current project directory
+- **Docker-in-Docker** - Run isolated Docker stacks with no port conflicts
+- **SSH git push** - Seamless git operations with deploy keys
+- **No prompts** - YOLO mode enabled automatically
+- **Shared sessions** - Same Claude session across regular and isolated modes
 
-# 2. Add github token to .claude-unchained.config.local.json (gitignored)
-{
-  "github": {
-    "token": "github_pat_YOUR_FINE_GRAINED_TOKEN"
-  }
-}
-```
+## Configuration Files
 
-**Note:** The fine-grained token is ONLY used for `gh` API commands (like `gh pr list`, `gh issue create`). Git operations (push/pull) still use the SSH deploy key.
+Priority order (later overrides earlier):
+1. `~/.claude-unchained.config.json` - Global base config
+2. `~/.claude-unchained.config.local.json` - Global secrets
+3. `./.claude-unchained.config.json` - Project config (committable)
+4. `./.claude-unchained.config.local.json` - Project secrets (gitignored)
 
-## Git Push Support
+Use `.local.json` suffix for secrets - they're automatically gitignored.
 
-For security, use repository-specific deploy keys instead of your main SSH key.
+## Default Whitelist
 
-**Setup:**
-```bash
-# 1. Generate a deploy key for this repo
-ssh-keygen -t ed25519 -f ~/.ssh/my-repo-deploy -C "my-repo-deploy"
-
-# 2. Add to GitHub as a deploy key with write access
-gh repo deploy-key add ~/.ssh/my-repo-deploy.pub --title "my-repo-deploy" --allow-write
-
-# 3. Configure git to use this key for this repo only
-git config core.sshCommand "ssh -i ~/.ssh/my-repo-deploy -o IdentitiesOnly=yes"
-
-# 4. Add SSH key path to .claude-unchained.config.local.json (gitignored)
-echo '{
-  "ssh": {
-    "keyPath": "~/.ssh/my-repo-deploy"
-  }
-}' > .claude-unchained.config.local.json
-```
-
-Only the specified deploy key is mounted in the container, preventing access to other repos.
+These domains are always accessible:
+- **Claude**: `code.claude.com`, `api.anthropic.com`, `platform.claude.com`, `claude.ai`
+- **GitHub**: `github.com`, `raw.githubusercontent.com`, `api.github.com`
+- **Docker Hub**: `auth.docker.io`, `registry-1.docker.io`, `hub.docker.com`, etc.
 
 ## Requirements
 
@@ -132,10 +120,13 @@ Only the specified deploy key is mounted in the container, preventing access to 
 ## Troubleshooting
 
 **"Credentials not found":**
-```bash
-claude login    # Login on host first
-```
+
+Run `claude login` on your host machine first. Credentials are shared between regular Claude and Claude Unchained.
 
 **"Permission denied (publickey)" when pushing:**
 - Ensure deploy key is added to GitHub with write access
-- Check git config: `git config core.sshCommand`
+- Check: `git config core.sshCommand`
+
+## License
+
+MIT
