@@ -203,6 +203,7 @@ DOCKER_CMD+=(
     --privileged
     --hostname=claude-unchained
     -e "CLAUDE_UNCHAINED_WHITELIST_DOMAINS=${CONFIG_WHITELIST_DOMAINS}"
+    -e "HOST_HOME=$HOME"
     -e "TERM=${TERM:-$DEFAULT_TERM}"
     -e "COLORTERM=${COLORTERM:-$DEFAULT_COLORTERM}"
 )
