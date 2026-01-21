@@ -175,6 +175,24 @@ setup_ssh_directory() {
     chmod 700 "$ssh_dir" 2>/dev/null || true
 }
 
+# Create symlink from host's .claude path to /home/claude/.claude
+#
+# Problem: Plugins installed on the host store absolute paths in installed_plugins.json
+# (e.g., /home/jpetitcolas/.claude/plugins/...). These paths don't exist in the container
+# where the home directory is /home/claude.
+#
+# Solution: Symlink the host's .claude directory to the container's .claude directory.
+# We only symlink .claude (not the entire home directory) to respect least privilege.
+setup_host_home_symlink() {
+    [ -z "$HOST_HOME" ] && return 0
+    [ "$HOST_HOME" = "/home/claude" ] && return 0
+
+    local host_claude_dir="$HOST_HOME/.claude"
+    echo "Creating symlink: $host_claude_dir -> /home/claude/.claude"
+    mkdir -p "$HOST_HOME" 2>/dev/null || true
+    ln -sf /home/claude/.claude "$host_claude_dir" 2>/dev/null || true
+}
+
 # Main execution
 add_extra_whitelisted_domains
 
@@ -198,6 +216,9 @@ chown -R claude:claude /home/claude/.claude 2>/dev/null || true
 # Only set up if SSH key exists
 # Note: Files are mounted read-only, so we only create the directory
 setup_ssh_directory "/home/claude/.ssh/id_ed25519" "/home/claude/.ssh"
+
+# Create symlink from host home path to allow plugin paths to resolve
+setup_host_home_symlink
 
 # Start Docker daemon in background for Docker-in-Docker support
 # Use vfs storage driver to avoid overlayfs whiteout issues in WSL2
