@@ -5,7 +5,8 @@ FROM ubuntu:24.04
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install essential packages including iptables for firewall and gosu for user switching
+# Install essential packages including iptables for firewall, gosu for user switching,
+# and nginx with stream module for SNI-based domain filtering
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -19,6 +20,8 @@ RUN apt-get update && apt-get install -y \
     gosu \
     jq \
     make \
+    nginx \
+    libnginx-mod-stream \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -92,6 +95,11 @@ RUN curl -fsSL https://claude.ai/install.sh | bash && \
 # Note: We install as root but will chown to claude user later
 RUN export PLAYWRIGHT_BROWSERS_PATH=/ms-playwright && \
     npx --yes @playwright/test@latest install chrome
+
+# Copy nginx configuration files (static parts)
+RUN mkdir -p /var/log/nginx /etc/nginx/stream.d
+COPY nginx/nginx.conf /etc/nginx/nginx.conf
+COPY nginx/sni-server.conf /etc/nginx/stream.d/sni-server.conf
 
 # Copy entrypoint script for firewall setup
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -1,4 +1,4 @@
-.PHONY: install uninstall
+.PHONY: install uninstall rebuild
 
 # Install: build image and install wrapper to /usr/local/bin
 install:
@@ -30,3 +30,9 @@ uninstall:
 	fi
 	@echo ""
 	@echo "Uninstall complete."
+
+# Rebuild: force full rebuild without cache (use after Dockerfile changes)
+rebuild:
+	@echo "Rebuilding claude-unchained Docker image (no cache)..."
+	@docker build --no-cache -t claude-unchained .
+	@echo "✓ Rebuild complete!"
