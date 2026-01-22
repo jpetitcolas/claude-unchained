@@ -39,6 +39,8 @@ WHITELISTED_DOMAINS=(
     "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com"
     "desktop.docker.com"
     "api.docker.com"
+    # npm registry - required for MCP plugins installed via npx
+    "registry.npmjs.org"
 )
 
 # Add extra domains from environment variable if set
