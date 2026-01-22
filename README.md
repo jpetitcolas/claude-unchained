@@ -4,7 +4,7 @@ Run Claude Code in an isolated Docker container with network firewall.
 
 **Why use this?** Run Claude with full permissions in a completely isolated environment, allowing it to work efficiently without the dangers of damaging your system or leaking information to malicious websites.
 
-- **Network firewall** - Only whitelisted domains accessible via iptables
+- **Domain-based firewall** - SNI proxy filters HTTPS traffic by domain name (not IP)
 - **Filesystem isolation** - Claude only sees the current project directory
 - **Scoped GitHub access** - Fine-grained token limited to specific repositories
 - **SSH key isolation** - Only repository-specific deploy keys mounted
@@ -87,12 +87,32 @@ You can now run `claude-unchained` in your project.
 
 ## What Does This Do?
 
-- **Network firewall** - Only whitelisted domains accessible (Claude, GitHub, Docker Hub always allowed)
+- **SNI proxy firewall** - All HTTPS traffic goes through nginx SNI proxy that filters by domain name
 - **Filesystem isolation** - Claude only sees current project directory
 - **Docker-in-Docker** - Run isolated Docker stacks with no port conflicts
 - **SSH git push** - Seamless git operations with deploy keys
 - **No prompts** - YOLO mode enabled automatically
 - **Shared sessions** - Same Claude session across regular and isolated modes
+
+## How the Firewall Works
+
+Claude Unchained uses an **SNI (Server Name Indication) proxy** instead of IP-based whitelisting:
+
+1. All outbound HTTPS traffic is redirected to a local nginx proxy
+2. The proxy inspects the TLS handshake's SNI field (the domain name)
+3. If the domain is whitelisted, traffic is forwarded; otherwise, blocked
+4. TLS certificate validation still happens, ensuring you're talking to the real server
+
+**Why SNI proxy instead of IP whitelisting?**
+
+- **No IP rotation issues** - CDNs like Cloudflare change IPs frequently, breaking IP-based rules
+- **Reliable** - Domain names don't change; IPs do
+- **Transparent** - No certificate tampering, just domain filtering
+
+**Security model:**
+
+- Claude cannot bypass this (uses standard TLS)
+- A developer who spoofs SNI AND disables cert validation is intentionally circumventing security
 
 ## Configuration Files
 
@@ -126,6 +146,15 @@ Run `claude login` on your host machine first. Credentials are shared between re
 **"Permission denied (publickey)" when pushing:**
 - Ensure deploy key is added to GitHub with write access
 - Check: `git config core.sshCommand`
+
+**Connection refused or blocked:**
+- Check if the domain is in your whitelist config
+- View SNI proxy logs: `docker exec <container> cat /var/log/nginx/sni-proxy.log`
+- The log shows which domains were allowed/blocked
+
+**MCP server not connecting:**
+- Add the MCP server's domain to your config (e.g., `mcp.linear.app` for Linear)
+- Restart the container to apply changes
 
 ## License
 
