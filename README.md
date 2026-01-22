@@ -130,6 +130,38 @@ These domains are always accessible:
 - **Claude**: `code.claude.com`, `api.anthropic.com`, `platform.claude.com`, `claude.ai`
 - **GitHub**: `github.com`, `raw.githubusercontent.com`, `api.github.com`
 - **Docker Hub**: `auth.docker.io`, `registry-1.docker.io`, `hub.docker.com`, etc.
+- **npm**: `registry.npmjs.org` (required for MCP plugins installed via `npx`)
+
+## MCP Plugins
+
+MCP (Model Context Protocol) servers often need network access to communicate with external APIs. You'll need to whitelist their domains for them to function.
+
+**Why does this matter?** When Claude uses an MCP plugin like Linear or Context7, the plugin makes HTTPS requests to its API. Without whitelisting, these requests are blocked by the firewall.
+
+### Common MCP Plugins
+
+| Plugin | Install Command | Required Domains |
+|--------|-----------------|------------------|
+| context7 | `npx -y @upstash/context7-mcp` | `mcp.context7.com` |
+| linear | `npx -y mcp-remote https://mcp.linear.app/mcp` | `mcp.linear.app`, `api.linear.app` |
+
+### Configuration Example
+
+Add the required domains to your project config (`.claude-unchained.config.json`):
+
+```json
+{
+  "networking": {
+    "whitelisted_domains": [
+      "mcp.context7.com",
+      "mcp.linear.app",
+      "api.linear.app"
+    ]
+  }
+}
+```
+
+Note: `registry.npmjs.org` is already in the default whitelist, so `npx` installations work out of the box.
 
 ## Requirements
 
@@ -153,8 +185,10 @@ Run `claude login` on your host machine first. Credentials are shared between re
 - The log shows which domains were allowed/blocked
 
 **MCP server not connecting:**
+- See the [MCP Plugins](#mcp-plugins) section for required domains
 - Add the MCP server's domain to your config (e.g., `mcp.linear.app` for Linear)
-- Restart the container to apply changes
+- Check SNI proxy logs to see which domain is being blocked: `docker exec <container> cat /var/log/nginx/sni-proxy.log`
+- Restart the container after updating your whitelist to apply changes
 
 ## License
 
