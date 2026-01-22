@@ -2,8 +2,6 @@
 # Entrypoint script for Claude Code isolated container
 # Uses SNI proxy (nginx) for domain-based filtering instead of IP whitelisting
 
-set -e
-
 # Configuration constants
 readonly DNS_PORT=53
 readonly HTTP_PORT=80
@@ -11,8 +9,13 @@ readonly HTTPS_PORT=443
 readonly SSH_PORT=22
 readonly SNI_PROXY_PORT=8443
 readonly DOCKER_STARTUP_TIMEOUT=30
-readonly DOCKER_POLL_INTERVAL=0.5
 readonly SNI_MAP_CONF="/etc/nginx/stream.d/sni-map.conf"
+
+# Cleanup on exit or interrupt
+cleanup() {
+    nginx -s quit 2>/dev/null || true
+}
+trap cleanup EXIT SIGTERM SIGINT
 
 # Hardcoded whitelist of allowed domains (minimal set)
 WHITELISTED_DOMAINS=(
@@ -101,9 +104,11 @@ start_sni_proxy() {
     generate_sni_domain_map
 
     # Test nginx configuration
-    if ! nginx -t 2>/dev/null; then
-        echo "ERROR: Nginx configuration test failed" >&2
-        nginx -t
+    local nginx_test_output
+    if ! nginx_test_output=$(nginx -t 2>&1); then
+        echo "❌ ERROR: Nginx configuration test failed" >&2
+        echo "$nginx_test_output" >&2
+        echo "  Check config: cat /etc/nginx/nginx.conf" >&2
         return 1
     fi
 
@@ -120,7 +125,9 @@ initialize_firewall() {
     echo "Setting up network firewall with SNI proxy..."
 
     # Disable IPv6 to prevent firewall bypass (we only proxy IPv4)
-    sysctl -w net.ipv6.conf.all.disable_ipv6=1 2>/dev/null || true
+    if ! sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1; then
+        echo "⚠️  Warning: Could not disable IPv6 (may not be available)"
+    fi
 
     # Flush existing rules
     iptables -t nat -F OUTPUT 2>/dev/null || true
@@ -157,12 +164,20 @@ initialize_firewall() {
     # Most services use HTTPS anyway; HTTP would bypass domain whitelist
 
     # Allow SSH to GitHub for git operations
-    for ip in $(dig +short github.com A 2>/dev/null); do
-        iptables -A OUTPUT -d "$ip" -p tcp --dport "$SSH_PORT" -j ACCEPT
-    done
-    for ip in $(dig +short ssh.github.com A 2>/dev/null); do
-        iptables -A OUTPUT -d "$ip" -p tcp --dport "$SSH_PORT" -j ACCEPT
-    done
+    local github_ips ssh_github_ips
+    github_ips=$(dig +short github.com A 2>/dev/null)
+    ssh_github_ips=$(dig +short ssh.github.com A 2>/dev/null)
+
+    if [ -z "$github_ips" ] && [ -z "$ssh_github_ips" ]; then
+        echo "⚠️  Warning: Could not resolve GitHub IPs for SSH whitelist"
+    else
+        for ip in $github_ips; do
+            iptables -A OUTPUT -d "$ip" -p tcp --dport "$SSH_PORT" -j ACCEPT
+        done
+        for ip in $ssh_github_ips; do
+            iptables -A OUTPUT -d "$ip" -p tcp --dport "$SSH_PORT" -j ACCEPT
+        done
+    fi
 
     echo "Firewall configured with SNI proxy redirect"
 }
@@ -177,13 +192,21 @@ start_docker_daemon() {
 # Wait for Docker daemon to become ready
 wait_for_docker() {
     local timeout="$1"
+    local waited=0
+
     echo "Waiting for Docker to be ready..."
-
-    if ! timeout "$timeout" bash -c "until docker info > /dev/null 2>&1; do sleep $DOCKER_POLL_INTERVAL; done"; then
-        echo "ERROR: Docker daemon failed to start within ${timeout}s" >&2
-        return 1
-    fi
-
+    while ! docker info > /dev/null 2>&1; do
+        if [ "$waited" -ge "$timeout" ]; then
+            echo ""
+            echo "❌ ERROR: Docker daemon failed to start within ${timeout}s" >&2
+            echo "  Check logs: cat /var/log/docker.log" >&2
+            return 1
+        fi
+        printf "  ⏳ Waiting for Docker... (%ds/%ds)\r" "$waited" "$timeout"
+        sleep 1
+        waited=$((waited + 1))
+    done
+    echo ""
     echo "Docker daemon ready!"
 }
 
@@ -219,14 +242,19 @@ print_whitelisted_domains() {
 }
 
 # Main execution
+echo "🚀 Starting Claude Code container..."
+echo ""
+
 add_extra_whitelisted_domains
 
-echo ""
 print_whitelisted_domains
 echo ""
 
 # Start SNI proxy first (before firewall redirects traffic to it)
-start_sni_proxy
+if ! start_sni_proxy; then
+    echo "❌ Failed to start SNI proxy"
+    exit 1
+fi
 
 # Set up firewall with SNI proxy redirect
 initialize_firewall
@@ -243,9 +271,13 @@ setup_ssh_directory "/home/claude/.ssh/id_ed25519" "/home/claude/.ssh"
 setup_host_home_symlink
 
 # Start Docker daemon in background for Docker-in-Docker support
-DOCKER_PID=$(start_docker_daemon)
-wait_for_docker "$DOCKER_STARTUP_TIMEOUT" || exit 1
+start_docker_daemon
+if ! wait_for_docker "$DOCKER_STARTUP_TIMEOUT"; then
+    exit 1
+fi
 
+echo ""
+echo "✅ Container ready"
 echo ""
 
 # Switch to claude user and execute the command passed to the container
