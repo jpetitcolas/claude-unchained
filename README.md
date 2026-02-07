@@ -127,7 +127,7 @@ Use `.local.json` suffix for secrets - they're automatically gitignored.
 ## Default Whitelist
 
 These domains are always accessible:
-- **Claude**: `code.claude.com`, `api.anthropic.com`, `platform.claude.com`, `claude.ai`
+- **Claude**: `code.claude.com`, `api.anthropic.com`, `platform.claude.com`, `claude.ai`, `*.claude.ai`, `mcp-proxy.anthropic.com`
 - **GitHub**: `github.com`, `raw.githubusercontent.com`, `api.github.com`
 - **Docker Hub**: `auth.docker.io`, `registry-1.docker.io`, `hub.docker.com`, etc.
 - **npm**: `registry.npmjs.org` (required for MCP plugins installed via `npx`)
@@ -143,7 +143,7 @@ MCP (Model Context Protocol) servers often need network access to communicate wi
 | Plugin | Install Command | Required Domains |
 |--------|-----------------|------------------|
 | context7 | `npx -y @upstash/context7-mcp` | `mcp.context7.com` |
-| linear | `npx -y mcp-remote https://mcp.linear.app/mcp` | `mcp.linear.app`, `api.linear.app` |
+| linear | `npx -y mcp-remote https://mcp.linear.app/mcp` | `linear.app`, `mcp.linear.app`, `api.linear.app` |
 
 ### Configuration Example
 
@@ -154,6 +154,7 @@ Add the required domains to your project config (`.claude-unchained.config.json`
   "networking": {
     "whitelisted_domains": [
       "mcp.context7.com",
+      "linear.app",
       "mcp.linear.app",
       "api.linear.app"
     ]
@@ -162,6 +163,8 @@ Add the required domains to your project config (`.claude-unchained.config.json`
 ```
 
 Note: `registry.npmjs.org` is already in the default whitelist, so `npx` installations work out of the box.
+
+Wildcard domains are supported with the `*.` prefix (e.g., `*.claude.ai` matches any subdomain like `mcp.claude.ai`). Following DNS convention, wildcards match subdomains only — add the apex domain separately if needed.
 
 ## Requirements
 

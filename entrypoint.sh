@@ -24,6 +24,8 @@ WHITELISTED_DOMAINS=(
     "api.anthropic.com"
     "platform.claude.com"
     "claude.ai"
+    "*.claude.ai"
+    "mcp-proxy.anthropic.com"
     # GitHub
     "github.com"
     "ssh.github.com"
@@ -54,7 +56,7 @@ add_extra_whitelisted_domains() {
     local added=0
     for domain in "${extra_domains[@]}"; do
         # Validate domain format (alphanumeric, dots, hyphens only)
-        if [[ "$domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
+        if [[ "$domain" =~ ^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
             WHITELISTED_DOMAINS+=("$domain")
             ((added++))
         else
@@ -89,8 +91,15 @@ MAP_HEADER
 
     # Add each whitelisted domain to the map
     for domain in "${WHITELISTED_DOMAINS[@]}"; do
-        local escaped=$(escape_domain_for_regex "$domain")
-        echo "    ~^${escaped}\$ \$ssl_preread_server_name:443;" >> "$SNI_MAP_CONF"
+        if [[ "$domain" == \*.* ]]; then
+            local base_domain="${domain#\*.}"
+            local escaped=$(escape_domain_for_regex "$base_domain")
+            # DNS wildcard: *.example.com matches subdomains only, not the apex
+            echo "    ~^.+\\.${escaped}\$ \$ssl_preread_server_name:443;" >> "$SNI_MAP_CONF"
+        else
+            local escaped=$(escape_domain_for_regex "$domain")
+            echo "    ~^${escaped}\$ \$ssl_preread_server_name:443;" >> "$SNI_MAP_CONF"
+        fi
     done
 
     echo "}" >> "$SNI_MAP_CONF"
